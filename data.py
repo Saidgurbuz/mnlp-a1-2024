@@ -16,7 +16,7 @@ def filter_by_length(dataset, min_len=100, max_len=128):
     """Filter out sequences with len(s)<min_len and len(s)>max_len.
     Hint: You can use the processing functions provided by Huggingface. 
     (https://huggingface.co/docs/datasets/en/process) """
-    dataset = ...
+    dataset = dataset.filter(lambda sample: min_len <= len(sample['text'].split()) <= max_len)
     return dataset
 
 def data_clean(dataset, min_len, max_len):
@@ -26,15 +26,15 @@ def data_clean(dataset, min_len, max_len):
     dataset = filter_by_length(dataset, min_len, max_len)
    
     # 2- Remove the samples with = * = \n patterns. (* denotes any possible sequences, e.g. `= = <section> = = \n `)
-    dataset = ...
+    dataset = dataset.filter(lambda sample: not (sample['text'].startswith(' = ') and sample['text'].endswith(' = \n')))
 
     # 3- Remove Non-English sequences.
     ## Hint: You can use isEnglish(sample) to find non-English sequences.
-    dataset = ...
+    dataset = dataset.filter(lambda sample: isEnglish(sample['text']))
 
     # 4- Lowercase all sequences.
     ## Hint: You can use lowerCase(sample) to lowercase the given sequence.
-    dataset = ...
+    dataset = dataset.map(lambda sample: lowerCase(sample))
     return dataset
 
 def count_tokens(dataset):
@@ -42,28 +42,31 @@ def count_tokens(dataset):
     You should return a dict with token as keys, frequency as values.
     Hint: you can use Counter() class to help."""
 
-    token_freq_dict = ...
+    token_freq_dict = Counter()
+    for sample in dataset:
+        token_freq_dict.update(sample['text'].split())
+    
     return token_freq_dict
 
 def build_vocabulary(dataset, min_freq=5, unk_token='<unk>'):
     """Builds a vocabulary dict for the given dataset."""
     # 1- Get unique tokens and their frequencies.
     ## Hint: Use `count_tokens()`.
-    token_freq_dict = ...
-
-    # 2- Find a set of rare tokens with frequency lower than `min_freq`.
+    token_freq_dict = count_tokens(dataset)
+    
+    # 2- Find a set of rare tokens with frequency less than or equal to `min_freq`.
     #    Replace them with `unk_token`.
     rare_tokens_set = set()
-    rare_tokens_set = ...
+    rare_tokens_set = {token for token, freq in token_freq_dict.items() if freq <= min_freq}
     dataset = dataset.map(replaceRare, fn_kwargs={"rare_tokens": rare_tokens_set,
                                                     "unk_token": unk_token})
 
     # 3- Filter out sequences with more than 15% rare tokens.
     ## Hint: Use `isUnkSeq()` function.
-    dataset = ...
+    dataset = dataset.filter(lambda sample: not isUnkSeq(sample, unk_token, 0.15))
 
     # 4- Recompute the token frequency to get final vocabulary dict.
-    token_freq_dict = ...
+    token_freq_dict = count_tokens(dataset)
     return dataset, token_freq_dict
 
 class RNNDataset(Dataset):
@@ -74,8 +77,8 @@ class RNNDataset(Dataset):
         self.max_seq_length = max_seq_length + 2 # as <start> and <stop> will be added
         self.dataset_vocab = self.get_dataset_vocabulary(dataset)
         # TODO: defining a dictionary maps tokens to a unique index in dataset_vocab.
-        self.token2idx = ...
-        self.idx2token = ...
+        self.token2idx = {token: idx for idx, token in enumerate(self.dataset_vocab)}
+        self.idx2token = {idx: token for idx, token in enumerate(self.dataset_vocab)}
         
         self.pad_idx = self.token2idx["<pad>"]
 
@@ -87,10 +90,10 @@ class RNNDataset(Dataset):
         ## Hint: what is the index of `<unk>`?
         token_list = self.train_data[idx].split()
         # having a fallback to <unk> token if an unseen word is encoded.
-        token_ids = ...
+        token_ids = [self.token2idx.get(token, self.token2idx["<unk>"]) for token in token_list]
         
         # TODO: Add padding token to the sequence to reach the max_seq_length. 
-        token_ids = ...
+        token_ids = token_ids[:self.max_seq_length] + [self.pad_idx] * (self.max_seq_length - len(token_ids))
 
         return torch.tensor(token_ids)
 
@@ -120,12 +123,12 @@ class RNNDataset(Dataset):
 def get_dataloader(rnn_dataset, test_ratio=0.1):
     # TODO: split train/test dataset.
     # you can add several lines of codes here
-    rnn_train_dataset, rnn_test_dataset = ...
+    rnn_train_dataset, rnn_test_dataset = torch.utils.data.random_split(rnn_dataset, [math.floor(len(rnn_dataset)*(1-test_ratio)), math.ceil(len(rnn_dataset)*test_ratio)])
 
     # TODO: get pytorch DataLoader
     ## Hint: training dataset need to be shuffled, but test dataset does not.
-    train_dataloader = ...
-    test_dataloader = ...
+    train_dataloader = DataLoader(rnn_train_dataset, batch_size=8, shuffle=True)
+    test_dataloader = DataLoader(rnn_test_dataset, batch_size=8, shuffle=False)
     return train_dataloader, test_dataloader
 
 
@@ -140,12 +143,12 @@ class CustomTokenizer:
         self.bos_token = bos_token
         self.eos_token = eos_token
         # TODO: define the following attributes
-        self.word_to_index = ...
-        self.index_to_word = ...
-        self.pad_token_id = ...
-        self.unk_token_id = ...
-        self.bos_token_id = ...
-        self.eos_token_id = ...
+        self.word_to_index = {word: index for index, word in enumerate(self.vocab)}
+        self.index_to_word = {index: word for index, word in enumerate(self.vocab)}
+        self.pad_token_id = self.vocab.index(self.pad_token)
+        self.unk_token_id = self.vocab.index(self.unk_token)
+        self.bos_token_id = self.vocab.index(self.bos_token)
+        self.eos_token_id = self.vocab.index(self.eos_token)
 
     def encode(self, text, max_length=None):
         """This method takes a natural text and encodes it into a sequence of token ids using the vocabulary.
@@ -161,7 +164,17 @@ class CustomTokenizer:
             List[int]: List of token ids.
         """
         # TODO: encode the given text into a sequence of token ids using the vocabulary.
-        token_ids = ...
+        tokens = text.split()
+        token_ids = [self.word_to_index.get(token, self.unk_token_id) for token in tokens]
+
+        if max_length is not None:
+            if len(token_ids) > max_length:
+                token_ids = token_ids[:max_length]
+            else:
+                token_ids += [self.pad_token_id] * (max_length - len(token_ids))
+    
+        token_ids = [self.bos_token_id] + token_ids + [self.eos_token_id]
+
         return token_ids
 
     def decode(self, sequence, skip_special_tokens=True):
@@ -176,7 +189,11 @@ class CustomTokenizer:
             List[str]: List of decoded tokens.
         """
         # TODO: decode the given sequence into a list of tokens using the vocabulary.
-        tokens = ...
+        ids_of_special_tokens = [self.pad_token_id, self.bos_token_id, self.eos_token_id, self.unk_token_id]
+        if skip_special_tokens:
+            tokens = [self.index_to_word[id] for id in sequence if id not in ids_of_special_tokens]
+        else:
+            tokens = [self.index_to_word[id] for id in sequence]
         return tokens
 
 class SCompDataset(Dataset):
@@ -190,18 +207,18 @@ class SCompDataset(Dataset):
         self.tokenizer = tokenizer
 
    def __len__(self):
-        return len(self.dataset)
+       return len(self.dataset)
 
    def __getitem__(self, idx):
-        # TODO: tokenize the input and output sequences and create the input mask
-        # make sure all ids are padded to the max_seq_length
-        input_ids = ...
-        output_ids = ...
-        input_mask = ...
+       # TODO: tokenize the input and output sequences and create the input mask
+       # make sure all ids are padded to the max_seq_length
+       input_ids = self.tokenizer.encode(self.dataset[idx][0], max_length=self.max_seq_length)
+       output_ids = self.tokenizer.encode(self.dataset[idx][1], max_length=self.max_seq_length)
+       input_mask = [1]*len(input_ids) + [0]*(self.max_seq_length - len(input_ids))
 
-        return {"input_ids": torch.tensor(input_ids), 
-                "output_ids": torch.tensor(output_ids),
-                "input_mask": torch.tensor(input_mask)}
+       return {"input_ids": torch.tensor(input_ids), 
+             "output_ids": torch.tensor(output_ids),
+             "input_mask": torch.tensor(input_mask)}
 
 
 class ScompT5Dataset(Dataset):
