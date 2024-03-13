@@ -1,1 +1,4 @@
+models/lstm_pretrained.pt filter=lfs diff=lfs merge=lfs -text
+models/lstm_scratch.pt filter=lfs diff=lfs merge=lfs -text
+models/encoder_decoder.pt filter=lfs diff=lfs merge=lfs -text
 models/ filter=lfs diff=lfs merge=lfs -text
