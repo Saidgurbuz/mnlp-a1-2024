@@ -101,7 +101,7 @@ class RNNDataset(Dataset):
         vocab = set()
         print("Getting the vocabulary for the train dataset")
         for sample in tqdm(dataset):
-            vocab.update(set(sample["text"].split()))
+            vocab.update(set(sample['text'].split()))
         vocab.update(set(["<start>", "<stop>", "<pad>" ]))
         vocab = sorted(vocab)
         return vocab
@@ -232,10 +232,10 @@ class ScompT5Dataset(Dataset):
 
     def __getitem__(self, index):
         # TODO: Tokenize the input and output sequences and create the input mask.
-        input_ids = ...
-        input_mask = ...
-        label_ids = ...
-        label_mask = ...
+        input_ids = torch.tensor(self.tokenizer.encode(self.raw_dataset[index][0], max_length=self.max_length, padding="max_length", truncation=True))
+        input_mask = torch.tensor([1] * len(input_ids) + [0] * (self.max_length - len(input_ids)))
+        label_ids = torch.tensor(self.tokenizer.encode(self.raw_dataset[index][1], max_length=self.max_length, padding="max_length", truncation=True))
+        label_mask = torch.tensor([1] * len(label_ids) + [0] * (self.max_length - len(label_ids)))
 
         return {
             'input_ids': input_ids.to(dtype=torch.long), 

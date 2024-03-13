@@ -44,13 +44,9 @@ class VanillaLSTM(nn.Module):
         
         # Get output from (LSTM layer-->dropout layer-->feedforward layer)
         ## You can add several lines of code here.
-        #print("VanillaLSTM: embedding:", embedding.size())
         output, hidden = self.lstm(embedding)
-        #print("VanillaLSTM: hidden:", hidden[0].size(), hidden[1].size())
-        #print("VanillaLSTM: output:", output.size())
         output = self.dropout(output)
         output = self.fc(output)
-        #print("VanillaLSTM: output:", output.size())
         return output
 
 def train_lstm(model, train_loader, optimizer, criterion, device="cuda:0", tensorboard_path="./tensorboard"):
@@ -146,19 +142,15 @@ class Encoder(nn.Module):
         # Hint 1: You should take into account the fact that pretrained encoder is bidirectional.
         # Hint 2: Check out the LSTM docs (https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html)
         # Hint 3: Do we need all the components of the pretrained encoder?
-        # TODO CHECK LATER!
         if input_mask is not None:
             input_ids = input_ids.masked_fill(input_mask == 0, 0)
-        #print('inside Encoder!')
-        #print('input_ids:', input_ids.size())
+
         embedded_input = self.pretrained_encoder.embedding(input_ids)
         encoder_outputs, (h_n, c_n) = self.pretrained_encoder.lstm(embedded_input)
-        #print('encoder_outputs:', encoder_outputs.size(), 'h_n:', h_n.size(), 'c_n:', c_n.size())
-        # Since pretrained encoder is bidirectional I concatenated the final hidden state from both directions
-        # Extract the last hidden states of the bidirectional LSTM
-        # Concatenate the final hidden states from both directions
+        # Since pretrained encoder is bidirectional I extracted
+        # the last hidden states of the bidirectional LSTM
+        # then concatenated the final hidden states from both directions
         encoder_hidden = torch.cat((h_n[-2, :, :], h_n[-1, :, :]), dim=1)
-        #print('encoder_outputs:', encoder_outputs.size(), 'encoder_hidden:', encoder_hidden.size())
         return encoder_outputs, encoder_hidden
 
 class AdditiveAttention(nn.Module):
@@ -171,13 +163,11 @@ class AdditiveAttention(nn.Module):
     def forward(self, query, values, mask):
         # TODO: Implement forward pass.
         # Note: this part requires several lines of code
-        #print('AdditiveAttention: query:', query.size(), 'values:', values.size(), 'mask:', mask.size())
         
+        # I did implementation according to the lecture slides
         query_w = self.query_weights(query).unsqueeze(1)
         values_w = self.value_weights(values)
-        #print('AdditiveAttention: query:', query.size(), 'values:', values.size(), 'mask:', mask.size())
         combined_w = self.combined_weights(torch.tanh(query_w + values_w)).squeeze(-1)
-        #print('AdditiveAttention: combined_w:', combined_w.size())
 
         if(mask is not None):
             combined_w = combined_w.masked_fill(mask == 0, float('-inf'))
@@ -187,7 +177,6 @@ class AdditiveAttention(nn.Module):
 
         # The context vector is the weighted sum of the values.
         context = torch.sum(weights.unsqueeze(-1) * values, 1)
-        #print('AdditiveAttention: context:', context.size(), 'weights:', weights.size())
         return context, weights
 
 class Decoder(nn.Module):
@@ -211,7 +200,8 @@ class Decoder(nn.Module):
         # Note: this part requires several lines of code
         # Hint: Use target_tensors to handle training and inference appropriately
 
-        
+        # I did the implementation based on the lecture slides, therefore changed the architecture a bit
+        # I used attention after the GRU layer
         # I used project_encoder_to_decoder to project the encoder hidden state to the decoder hidden state
         # as the hidden states of the encoder and decoder are of different dimensions (2 * hidden_size and hidden_size respectively)
         decoder_hidden = self.project_encoder_to_decoder(encoder_hidden).unsqueeze(0)
@@ -248,10 +238,7 @@ class Decoder(nn.Module):
         decoder_outputs = torch.cat(decoder_outputs_list, dim=1)
         decoder_outputs = self.dropout(decoder_outputs)
         decoder_outputs = self.out(decoder_outputs)
-        #print("decoder_outputs:", decoder_outputs[0].sum(dim=-1))
         decoder_outputs = F.log_softmax(decoder_outputs, dim=-1)
-        #print("decoder_output shape:", decoder_outputs.size())
-        #print("decoder_outputs:", decoder_outputs[0].sum(dim=-1))
         return decoder_outputs, decoder_hidden
     
 class EncoderDecoder(nn.Module):
@@ -278,8 +265,8 @@ def seq2seq_eval(model, eval_loader, criterion, device=0):
         # TODO: Forward pass
         decoder_outputs, decoder_hidden = model(input_ids, input_mask, target_ids, device=device)
 
-        batch_max_seq_length = target_ids.size(1)
         labels = target_ids[:, 1:] # I omited the start token from the labels
+        batch_max_seq_length = labels.size(1)
 
         # to padd or truncate the sequence
         decoder_outputs = decoder_outputs[:, :batch_max_seq_length, :]
@@ -287,7 +274,6 @@ def seq2seq_eval(model, eval_loader, criterion, device=0):
 
         # TODO: Compute loss
         loss = criterion(decoder_outputs.reshape(-1, decoder_outputs.size(-1)), labels.contiguous().view(-1))
-        #print("loss:", loss.item())
         epoch_loss += loss.item()
 
     model.train()
@@ -316,11 +302,8 @@ def seq2seq_train(model, train_loader, eval_loader, optimizer, criterion, num_ep
             decoder_outputs = decoder_outputs[:, :batch_max_seq_length, :]
             labels = labels[:, :batch_max_seq_length]
             # TODO: Compute loss
-            #print(decoder_outputs.reshape(-1, decoder_outputs.size(-1))[0])
-            #print(decoder_outputs.reshape(-1, decoder_outputs.size(-1)).size(), labels.contiguous().view(-1).size())
             loss = criterion(decoder_outputs.reshape(-1, decoder_outputs.size(-1)), labels.contiguous().view(-1))
 
-            print("loss:", loss.item())
             epoch_loss += loss.item()
             
             # TODO: Zero gradients, perform a backward pass, and update the weights.
@@ -372,12 +355,11 @@ def seq2seq_generate(model, test_loader, tokenizer, device=0):
 
 def evaluate_rouge(generations):
     # TODO: Implement ROUGE evaluation
-    references = ...
-    predictions = ...
+    references = [" ".join(generation['reference']) for generation in generations]
+    predictions = [" ".join(generation['prediction']) for generation in generations]
 
     rouge = evaluate.load('rouge')
-
-    rouge_scores = ...
+    rouge_scores = rouge.compute(predictions=predictions, references=references)
 
     return rouge_scores
 
@@ -386,13 +368,16 @@ def t5_generate(dataset, model, tokenizer, device=0):
     generations = []
 
     for sample in tqdm(dataset, total=len(dataset)):
-        reference = ...
+        input_ids = sample["input_ids"].to(device)
+        label_ids = sample["label_ids"].to(device)
 
         # Hint: use huggingface text generation
-        outputs = ...
-        prediction = ...
+        outputs = model.generate(input_ids.unsqueeze(0), max_length=input_ids.size(0) + 50)
+        input = tokenizer.decode(input_ids, skip_special_tokens=True)
+        prediction = tokenizer.decode(outputs.squeeze(0), skip_special_tokens=True)
+        reference = tokenizer.decode(label_ids, skip_special_tokens=True)
         generations.append({
-            "input": ..., 
+            "input": input, 
             "reference": reference, 
             "prediction": prediction})
     
